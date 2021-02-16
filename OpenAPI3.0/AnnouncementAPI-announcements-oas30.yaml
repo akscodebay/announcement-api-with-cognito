@@ -1,0 +1,204 @@
+openapi: "3.0.1"
+info:
+  title: "AnnouncementAPI"
+  description: "Announcement API."
+  version: "1.0.0"
+servers:
+- url: "https://7g6od979qe.execute-api.ap-south-1.amazonaws.com/{basePath}"
+  variables:
+    basePath:
+      default: "announcements"
+paths:
+  /announcement:
+    post:
+      parameters:
+      - name: "Api-Version"
+        in: "header"
+        required: true
+        schema:
+          type: "integer"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnnouncementValidate"
+        required: true
+      responses:
+        201:
+          description: "Created"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/dataCreated"
+        400:
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        401:
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        403:
+          description: "Access Denied"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        415:
+          description: "Unsupported Media Type"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        500:
+          description: "Server error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+      - APIAuthorizer:
+        - "openid"
+      - api_key: []
+  /announcements:
+    get:
+      parameters:
+      - name: "pageNo"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+      - name: "Api-Version"
+        in: "header"
+        required: true
+        schema:
+          type: "string"
+      responses:
+        200:
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/data"
+        400:
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        403:
+          description: "Access Denied"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        404:
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        500:
+          description: "Server error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+      - api_key: []
+components:
+  schemas:
+    data:
+      title: "Items Schema"
+      type: "object"
+      properties:
+        data:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              date:
+                type: "string"
+              description:
+                type: "string"
+              id:
+                type: "string"
+              title:
+                type: "string"
+    dataCreated:
+      title: "Created Response Schema"
+      type: "object"
+      properties:
+        data:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              id:
+                type: "string"
+              status:
+                type: "string"
+              code:
+                type: "string"
+              title:
+                type: "string"
+    Error:
+      title: "Error Response Schema"
+      type: "object"
+      properties:
+        errors:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              id:
+                type: "string"
+              status:
+                type: "string"
+              code:
+                type: "string"
+              title:
+                type: "string"
+    AnnouncementValidate:
+      title: "The announcement schema"
+      required:
+      - "data"
+      type: "object"
+      properties:
+        data:
+          title: "The data schema"
+          required:
+          - "desc"
+          - "title"
+          type: "object"
+          properties:
+            title:
+              title: "The title schema"
+              type: "string"
+              description: "Title of Announcement."
+              default: ""
+            desc:
+              title: "The desc schema"
+              type: "string"
+              description: "Description of Announcement."
+              default: ""
+          additionalProperties: false
+          description: "Data object contains announcement data."
+          default: {}
+      additionalProperties: false
+      description: "The root schema comprises the entire JSON document."
+      default: {}
+  securitySchemes:
+    api_key:
+      type: "apiKey"
+      name: "x-api-key"
+      in: "header"
+    APIAuthorizer:
+      type: "apiKey"
+      name: "Auth"
+      in: "header"
+      x-amazon-apigateway-authtype: "cognito_user_pools"

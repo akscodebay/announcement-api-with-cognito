@@ -1,0 +1,610 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template for Announcement API Creation.
+
+#Parameters for Dyanomodb, lambda and API Gateway.
+Parameters:
+  SaveAnnouncementLambdaName:
+    Type: String
+    Description: Name of Save Announcement lambda.
+    AllowedPattern: ^.*[^0-9]$
+    ConstraintDescription: Must end with non-numeric character.
+    Default: SaveAnnouncementLambda
+  GetAnnouncementLambdaName:
+    Type: String
+    Description: Name of Get Announcement lambda.
+    AllowedPattern: ^.*[^0-9]$
+    ConstraintDescription: Must end with non-numeric character.
+    Default: GetAnnouncementLambda
+  AuthenticationLambdaName:
+    Type: String
+    Description: Name of Authentication lambda.
+    AllowedPattern: ^.*[^0-9]$
+    ConstraintDescription: Must end with non-numeric character.
+    Default: AuthenticationLambda
+  APIName:  
+    Type: String
+    Description: Name of API. 
+    AllowedPattern: ^[a-zA-Z]+$
+    ConstraintDescription: Only letters allowed.
+    Default: AnnouncementAPI
+  EnvironmentName:
+    Type: String
+    Description: Name of Stage.
+    AllowedPattern: ^[a-zA-Z]+$
+    ConstraintDescription: Only letters allowed.
+    Default: announcements
+  UsageName:
+    Type: String
+    Description: Name of Usage Plan.
+    AllowedPattern: ^[a-zA-Z]+$
+    ConstraintDescription: Only letters allowed.
+    Default: test
+
+#Resource definitions    
+Resources:
+#Dynamodb resource definiton
+  DynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: AnnouncementTable
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: '5'
+        WriteCapacityUnits: '5'
+  
+  #Lambda & Role definition to Save Announcement
+  SaveAnnouncementLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub ${SaveAnnouncementLambdaName}-Role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+            - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+              - lambda.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Path: /
+  DynamoDBPutItemPolicy: 
+    Type: "AWS::IAM::Policy"
+    Properties: 
+      PolicyName: "DynamoDBPutItemPolicy"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Action:
+              - 'dynamodb:PutItem*'
+            Resource: !GetAtt DynamoDBTable.Arn
+      Roles: 
+        - !Ref SaveAnnouncementLambdaRole
+    DependsOn:
+      - SaveAnnouncementLambdaRole
+  SaveAnnouncementLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${SaveAnnouncementLambdaName}
+      Description: LambdaFunction of python3.8.
+      Runtime: python3.8
+      Code:
+        S3Bucket: aks-announcement
+        S3Key: saveAnnouncement.zip
+      Handler: saveAnnouncement.lambda_handler
+      Role: !GetAtt
+          - SaveAnnouncementLambdaRole
+          - Arn
+    DependsOn:
+      - SaveAnnouncementLambdaRole
+      - DynamoDBPutItemPolicy
+      - DynamoDBTable
+
+  #Lambda & Role definition to Get Announcement
+  GetAnnouncementLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub ${GetAnnouncementLambdaName}-Role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+            - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+              - lambda.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Path: /
+  DynamoDBScanPolicy: 
+    Type: "AWS::IAM::Policy"
+    Properties: 
+      PolicyName: "DynamoDBPutScanPolicy"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Action:
+              - 'dynamodb:Scan*'
+            Resource: !GetAtt DynamoDBTable.Arn
+      Roles: 
+        - !Ref GetAnnouncementLambdaRole
+    DependsOn:
+      - GetAnnouncementLambdaRole
+  GetAnnouncementLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${GetAnnouncementLambdaName}
+      Description: LambdaFunction of python3.8.
+      Runtime: python3.8
+      Code:
+        S3Bucket: aks-announcement
+        S3Key: listofAnnouncement.zip
+      Handler: listofAnnouncement.lambda_handler
+      Role: !GetAtt
+          - GetAnnouncementLambdaRole
+          - Arn
+    DependsOn:
+      - GetAnnouncementLambdaRole
+      - DynamoDBScanPolicy
+      - DynamoDBTable
+  
+  #API Gateway
+  APIGatewayRestAPI:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Description: Announcement API.
+      Name: !Sub ${APIName}
+      ApiKeySourceType: HEADER
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+#Authorizer for API
+  Authorizer:
+    Type: 'AWS::ApiGateway::Authorizer'
+    Properties:
+      Type: COGNITO_USER_POOLS
+      ProviderARNs:
+        - !GetAtt UserPool.Arn
+      IdentitySource: method.request.header.Auth
+      Name: APIAuthorizer
+      RestApiId: !Ref APIGatewayRestAPI
+    DependsOn:
+      - APIGatewayRestAPI
+  
+#Cognito Authorizer
+  UserPool:
+    Type: "AWS::Cognito::UserPool"
+    Properties:
+      UserPoolName: apiauth
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: false
+          Required: true
+
+  UserPoolClient:
+    Type: "AWS::Cognito::UserPoolClient"
+    Properties:
+      ClientName: client
+      GenerateSecret: false
+      UserPoolId: !Ref UserPool
+      AllowedOAuthFlows:
+        - implicit
+      AllowedOAuthFlowsUserPoolClient: true
+      SupportedIdentityProviders:
+        - COGNITO
+      AllowedOAuthScopes:
+        - openid
+      CallbackURLs:
+        - https://127.0.0.1
+    DependsOn:
+      - UserPool
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: aayush
+      UserPoolId: !Ref UserPool
+    DependsOn:
+      - UserPool
+
+  #API Gateway Resource definiton for announcement.
+  AnnouncementSaveAPIGatewayResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt APIGatewayRestAPI.RootResourceId
+      PathPart: announcement
+      RestApiId: !Ref APIGatewayRestAPI
+    DependsOn:
+      - APIGatewayRestAPI
+
+#Model to validate request
+  AnnouncementValidate:
+    Type: 'AWS::ApiGateway::Model'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ContentType: application/json
+      Description: Schema for Announcement
+      Name: AnnouncementValidate
+      Schema:
+        "$schema": http://json-schema.org/draft-07/schema
+        title: "The root schema"
+        required:
+        - "data"
+        type: "object"
+        properties:
+          data:
+            title: "The data schema"
+            required:
+            - "desc"
+            - "title"
+            type: "object"
+            properties:
+              title:
+                title: "The title schema"
+                type: "string"
+                description: "Title of Announcement."
+                default: ""
+              desc:
+                title: "The desc schema"
+                type: "string"
+                description: "Description of Announcement."
+                default: ""
+            additionalProperties: false
+            description: "Data object contains announcement data."
+            default: {}
+        additionalProperties: false
+        description: "The root schema comprises the entire JSON document."
+        default: {}
+    DependsOn:
+      - AnnouncementSaveAPIGatewayResource
+  
+  #Request Validator
+  RequestValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      Name: RequestValidator
+      RestApiId: !Ref APIGatewayRestAPI
+      ValidateRequestBody: true
+      ValidateRequestParameters: true
+  
+  #POST method definition for saving announcement. 
+  AnnouncementAPIGatewayPOSTMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      HttpMethod: POST
+      ResourceId: !Ref AnnouncementSaveAPIGatewayResource 
+      RestApiId: !Ref APIGatewayRestAPI
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref Authorizer
+      AuthorizationScopes:
+        - openid
+      ApiKeyRequired: true
+      RequestModels:
+        application/json: AnnouncementValidate
+      RequestValidatorId: !Ref RequestValidator
+      RequestParameters:
+        method.request.header.Api-Version: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 
+          - >- 
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SaveAnnouncementLambdaArn}/invocations
+          - SaveAnnouncementLambdaArn: !GetAtt SaveAnnouncementLambdaFunction.Arn
+
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+    DependsOn:
+      - AnnouncementSaveAPIGatewayResource
+      - SaveAnnouncementLambdaFunction
+      - AnnouncementValidate
+      - UserPool
+
+  #API Gateway Resource definiton for announcement.
+  AnnouncementGetAPIGatewayResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt APIGatewayRestAPI.RootResourceId
+      PathPart: announcements
+      RestApiId: !Ref APIGatewayRestAPI
+    DependsOn:
+      - APIGatewayRestAPI
+
+  #Get method definition for getting announcements. 
+  AnnouncementAPIGatewayGETMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      HttpMethod: GET
+      ResourceId: !Ref AnnouncementGetAPIGatewayResource 
+      RestApiId: !Ref APIGatewayRestAPI
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      RequestValidatorId: !Ref RequestValidator
+      RequestParameters:
+        method.request.querystring.pageNo: true
+        method.request.header.Api-Version: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 
+          - >- 
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetAnnouncementLambdaArn}/invocations
+          - GetAnnouncementLambdaArn: !GetAtt GetAnnouncementLambdaFunction.Arn
+
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+    DependsOn:
+      - AnnouncementGetAPIGatewayResource
+      - GetAnnouncementLambdaFunction
+  
+  #API Deployment
+  APIGatewayDeployment:
+    Type: 'AWS::ApiGateway::Deployment'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      StageName: !Ref EnvironmentName
+    DependsOn:
+      - AnnouncementAPIGatewayGETMethod
+      - AnnouncementAPIGatewayPOSTMethod
+  
+    #Lambda permission for Save announcement lambda
+  SaveAnnouncementLambdaAPIGatewayPermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt  SaveAnnouncementLambdaFunction.Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - APIGatewayDeployment
+  
+  #Lambda permission for Get Announcements lambda
+  GetAnnouncementLambdaAPIGatewayPermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt  GetAnnouncementLambdaFunction.Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - APIGatewayDeployment
+
+  #Usage Plan for api.
+  APIUsagePlan:
+    Type: 'AWS::ApiGateway::UsagePlan'
+    Properties:
+      ApiStages:
+      Description: Usage Plan for API Usage limitation.
+      UsagePlanName: !Sub APILimit-${UsageName}
+      Throttle: 
+        BurstLimit: 5
+        RateLimit: 1
+      Quota:
+        Limit: 200
+        Period: MONTH
+      ApiStages:
+        - ApiId: !Ref APIGatewayRestAPI
+          Stage: !Ref EnvironmentName
+    DependsOn:
+      - APIGatewayDeployment
+      - ApiKey
+  
+  #API Details for usage plan.
+  APIUsagePlanKey:
+    Type: 'AWS::ApiGateway::UsagePlanKey'
+    Properties: 
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref APIUsagePlan
+    DependsOn:
+      - ApiKey
+  
+  #API key definition for accessing API Gateway.
+  ApiKey:
+    Type: 'AWS::ApiGateway::ApiKey'
+    DependsOn:
+      - APIGatewayDeployment
+    Properties:
+      Name: API key
+      Description: CloudFormation API Key V1
+      Enabled: true
+      StageKeys:
+        - RestApiId: !Ref APIGatewayRestAPI
+          StageName: !Ref EnvironmentName
+  
+  #API Default Responses
+  GatewayResponseAccessDenied: 
+    Type: AWS::ApiGateway::GatewayResponse 
+    Properties: 
+      ResponseParameters: 
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'" 
+      ResponseTemplates: 
+        "application/json" : !Sub 
+          - '{ "errors": [ { "id": "$context.requestId", "status": "${Status}", "code": "${Code}", "title": "Access Denied" } ] }' 
+          - Code: "ACCESS_DENIED" 
+            Status: 403 
+      ResponseType: ACCESS_DENIED 
+      RestApiId: !Ref APIGatewayRestAPI 
+      StatusCode: 403
+    DependsOn:
+      - APIGatewayRestAPI
+
+  GatewayResponseDefault5XX: 
+    Type: AWS::ApiGateway::GatewayResponse 
+    Properties: 
+      ResponseParameters: 
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'" 
+      ResponseTemplates: 
+        "application/json" : !Sub 
+          - '{ "errors": [ { "id": "$context.requestId", "status": "${Status}", "code": "${Code}", "title": "Server error" } ] }' 
+          - Code: "SERVER_ERROR" 
+            Status: 500 
+      ResponseType: DEFAULT_5XX 
+      RestApiId: !Ref APIGatewayRestAPI 
+      StatusCode: 500
+    DependsOn:
+      - APIGatewayRestAPI
+  
+  GatewayResponseBadRequestBody: 
+    Type: AWS::ApiGateway::GatewayResponse 
+    Properties: 
+      ResponseParameters: 
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'" 
+      ResponseTemplates: 
+        "application/json" : !Sub 
+          - '{ "errors": [ { "id": "$context.requestId", "status": "${Status}", "code": "${Code}", "title": "Bad Request Body" } ] }' 
+          - Code: "BAD_REQUEST" 
+            Status: 400 
+      ResponseType: BAD_REQUEST_BODY 
+      RestApiId: !Ref APIGatewayRestAPI 
+      StatusCode: 400
+    DependsOn:
+      - APIGatewayRestAPI
+  
+  GatewayResponseBadRequestParameter: 
+    Type: AWS::ApiGateway::GatewayResponse 
+    Properties: 
+      ResponseParameters: 
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'" 
+      ResponseTemplates: 
+        "application/json" : !Sub 
+          - '{ "errors": [ { "id": "$context.requestId", "status": "${Status}", "code": "${Code}", "title": "Input validation error - invalid parameter
+value" } ] }' 
+          - Code: "INVALID_PARAMETER_VALUE" 
+            Status: 400 
+      ResponseType: BAD_REQUEST_PARAMETERS 
+      RestApiId: !Ref APIGatewayRestAPI 
+      StatusCode: 400
+    DependsOn:
+      - APIGatewayRestAPI
+  
+  GatewayResponseDefault4XX: 
+    Type: AWS::ApiGateway::GatewayResponse 
+    Properties: 
+      ResponseParameters: 
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'" 
+      ResponseTemplates: 
+        "application/json" : !Sub 
+          - '{ "errors": [ { "id": "$context.requestId", "status": "${Status}", "code": "${Code}", "title": "Bad Request" } ] }' 
+          - Code: "BAD_REQUEST" 
+            Status: 400 
+      ResponseType: DEFAULT_4XX 
+      RestApiId: !Ref APIGatewayRestAPI 
+      StatusCode: 400
+    DependsOn:
+      - APIGatewayRestAPI
+
+  GatewayResponseInvalidApiKey: 
+    Type: AWS::ApiGateway::GatewayResponse 
+    Properties: 
+      ResponseParameters: 
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'" 
+      ResponseTemplates: 
+        "application/json" : !Sub 
+          - '{ "errors": [ { "id": "$context.requestId", "status": "${Status}", "code": "${Code}", "title": "Invalid API Key" } ] }' 
+          - Code: "INVALID_API_KEY" 
+            Status: 403 
+      ResponseType: INVALID_API_KEY 
+      RestApiId: !Ref APIGatewayRestAPI 
+      StatusCode: 403
+    DependsOn:
+      - APIGatewayRestAPI
+
+  GatewayResponseMissingAuthenticationToken: 
+    Type: AWS::ApiGateway::GatewayResponse 
+    Properties: 
+      ResponseParameters: 
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'" 
+      ResponseTemplates: 
+        "application/json" : !Sub 
+          - '{ "errors": [ { "id": "$context.requestId", "status": "${Status}", "code": "${Code}", "title": "Missing Authentication Token" } ] }' 
+          - Code: "MISSING_AUTHENTICATION_TOKEN" 
+            Status: 403 
+      ResponseType: MISSING_AUTHENTICATION_TOKEN 
+      RestApiId: !Ref APIGatewayRestAPI 
+      StatusCode: 403
+    DependsOn:
+      - APIGatewayRestAPI
+
+  GatewayResponseQuotaExceeded: 
+    Type: AWS::ApiGateway::GatewayResponse 
+    Properties: 
+      ResponseParameters: 
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'" 
+      ResponseTemplates: 
+        "application/json" : !Sub 
+          - '{ "errors": [ { "id": "$context.requestId", "status": "${Status}", "code": "${Code}", "title": "Too Many Requests" } ] }' 
+          - Code: "QUOTA_EXCEEDED" 
+            Status: 429 
+      ResponseType: QUOTA_EXCEEDED 
+      RestApiId: !Ref APIGatewayRestAPI 
+      StatusCode: 429
+    DependsOn:
+      - APIGatewayRestAPI
+
+  GatewayResponseThrolled: 
+    Type: AWS::ApiGateway::GatewayResponse 
+    Properties: 
+      ResponseParameters: 
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'" 
+      ResponseTemplates: 
+        "application/json" : !Sub 
+          - '{ "errors": [ { "id": "$context.requestId", "status": "${Status}", "code": "${Code}", "title": "Throttling Limits Exceeded" } ] }' 
+          - Code: "THROTTLED" 
+            Status: 429 
+      ResponseType: THROTTLED 
+      RestApiId: !Ref APIGatewayRestAPI 
+      StatusCode: 429
+    DependsOn:
+      - APIGatewayRestAPI
+
+  GatewayResponseUnauthorized: 
+    Type: AWS::ApiGateway::GatewayResponse 
+    Properties: 
+      ResponseParameters: 
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'" 
+      ResponseTemplates: 
+        "application/json" : !Sub 
+          - '{ "errors": [ { "id": "$context.requestId", "status": "${Status}", "code": "${Code}", "title": "Unauthorized" } ] }' 
+          - Code: "UNAUTHORIZED" 
+            Status: 401 
+      ResponseType: UNAUTHORIZED 
+      RestApiId: !Ref APIGatewayRestAPI 
+      StatusCode: 401
+    DependsOn:
+      - APIGatewayRestAPI
+
+  GatewayResponseUnsupportedMediaType: 
+    Type: AWS::ApiGateway::GatewayResponse 
+    Properties: 
+      ResponseParameters: 
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'" 
+      ResponseTemplates: 
+        "application/json" : !Sub 
+          - '{ "errors": [ { "id": "$context.requestId", "status": "${Status}", "code": "${Code}", "title": "Unsupported media type" } ] }' 
+          - Code: "UNSUPPORTED_MEDIA_TYPE" 
+            Status: 415 
+      ResponseType: UNSUPPORTED_MEDIA_TYPE 
+      RestApiId: !Ref APIGatewayRestAPI 
+      StatusCode: 415
+    DependsOn:
+      - APIGatewayRestAPI  
